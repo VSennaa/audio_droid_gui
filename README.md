@@ -9,6 +9,9 @@ Interface minimalista para conectar `scrcpy` apenas para áudio (playback), com 
 - `pip install -r requirements.txt` (ainda n fiz e nem sei se vou fazer um dia, é só uma lib kkk)
 - `scrcpy` e `adb` no `PATH` para rodar sem empacotar, disponível [aqui](https://github.com/Genymobile/scrcpy)
 
+## Distribuível
+- Vou adicionar um dia, esse negócio de empacotar com projeto dos outros é complicado
+
 ## Instalação (dev)
 ```bash
 python -m venv .venv
