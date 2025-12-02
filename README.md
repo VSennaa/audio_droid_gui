@@ -6,7 +6,7 @@ Interface minimalista para conectar `scrcpy` apenas para áudio (playback), com 
 ## Requisitos (desenvolvimento)
 - Windows 10/11 (ou Linux/macOS com adaptações)
 - Python 3.8+
-- `pip install -r requirements.txt` (ver detalhes abaixo)
+- `pip install -r requirements.txt` (ainda n fiz e nem sei se vou fazer um dia, é só uma lib kkk)
 - `scrcpy` e `adb` no `PATH` para rodar sem empacotar, disponível [aqui](https://github.com/Genymobile/scrcpy)
 
 ## Instalação (dev)
@@ -14,5 +14,4 @@ Interface minimalista para conectar `scrcpy` apenas para áudio (playback), com 
 python -m venv .venv
 .venv\Scripts\activate
 pip install --upgrade pip
-pip install customtkinter
-# ou: pip install -r requirements.txt   (se você criar esse arquivo)
+pip install customtkinter 
