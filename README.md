@@ -1,4 +1,4 @@
-# sa — scrcpy audio helper (GUI)
+# Python Scrcpy (GUI)
 
 Interface minimalista para conectar `scrcpy` apenas para áudio (playback), com fallbacks  
 (quick connect, set 5555 via USB, manual connect), persistência `config.json`, e controle de conexão.
