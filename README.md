@@ -1,103 +1,172 @@
-# AudioDroid (GUI)
+## AudioDroid (GUI)
 
-Interface minimalista para conectar `scrcpy` apenas para áudio (playback), com fallbacks (quick connect, set 5555 via USB, manual connect), persistência de configurações (`config.json`) e controle visual de conexão.
+**AudioDroid** é uma interface minimalista para conectar o **scrcpy** em modo **apenas áudio (playback)**.  
+Ele resolve o problema de **portas dinâmicas do ADB Wireless no Android 11+** e oferece **controles nativos no Windows**.
 
----
+### Principais recursos
 
-## 📱 Configuração do Android (Obrigatório)
+- **Auto-Connect Inteligente**  
+  Detecta automaticamente a porta ADB dinâmica consultando um servidor Python no Termux via HTTP.
 
-Antes de usar o programa, você precisa preparar seu celular.
+- **Controle de Volume Independente**  
+  Ajusta o volume apenas do processo do scrcpy, sem alterar o mixer global do Windows.
 
-### 1. Ativar Opções do Desenvolvedor
-1.  Vá em **Configurações** > **Sobre o telefone**.
-2.  Procure por **Número da Versão** (ou *Número de Compilação*).
-3.  Toque nele **7 vezes** seguidas até aparecer a mensagem "Você agora é um desenvolvedor!".
+- **Global Hotkeys**  
+  Pause e despause a música do celular usando a tecla de mídia do teclado ou **Ctrl + Alt + P**, mesmo com o app minimizado.
 
-### 2. Configurar Depuração Sem Fio (ADB Wireless)
-
-Existem duas formas de conectar, dependendo da sua versão do Android:
-
-#### A. Android 11 ou superior (Recomendado - Sem cabo)
-1.  Vá em **Configurações** > **Sistema** > **Opções do Desenvolvedor**.
-2.  Ative a opção **Depuração por Wi-Fi** (Wireless Debugging).
-3.  Toque sobre o texto "Depuração por Wi-Fi" para entrar no menu.
-4.  Selecione **"Parear dispositivo com código de pareamento"**.
-    * Use o IP, Porta e Código mostrados nesta tela na função **Parear** do AudioDroid.
-    * *Nota: O IP e Porta para pareamento mudam a cada conexão.*
-
-#### B. Android 10 ou inferior (Ou método fixo via USB)
-Se o seu Android é antigo ou você quer usar a porta padrão `5555` sem precisar parear toda vez:
-1.  Conecte o celular ao PC via **Cabo USB**.
-2.  Nas Opções do Desenvolvedor, ative **Depuração USB**.
-3.  Abra a pasta do `scrcpy` no terminal e digite:
-    ```bash
-    adb tcpip 5555
-    ```
-4.  Pode desconectar o cabo. Agora você pode usar a **Conexão Rápida** usando apenas o IP do celular na porta 5555.
+- **Histórico Inteligente (Smart Stack)**  
+  Alterna automaticamente entre IPs de redes diferentes (ex: Wi-Fi 2.4 GHz / 5 GHz).
 
 ---
 
-## 🚀 Como usar o AudioDroid
+## Como Funciona
 
-### 1. Pré-requisitos e Instalação do Scrcpy
-O AudioDroid requer os binários do scrcpy para funcionar.
-
-1.  **Baixe o scrcpy v3.3.2**:
-    Acesse o site oficial e baixe a versão **3.3.2**:
-    [https://github.com/Genymobile/scrcpy/releases/tag/v3.3.2](https://github.com/Genymobile/scrcpy/releases/tag/v3.3.2)
-2.  **Extração**:
-    Extraia a pasta do scrcpy em um local seguro do seu computador.
-    *Exemplo:* `C:\scrcpy-win64-v3.3.2`
-
-### 2. Executando o AudioDroid
-1.  Execute o arquivo [**`scycrp_aud_gui.exe`**](https://github.com/VSennaa/audio_droid_gui/releases/download/1.1/scycrp_aud_gui.exe).
-2.  **Primeira Execução**: O programa pedirá para selecionar a **pasta raiz** onde você extraiu o scrcpy.
-    * O sistema valida automaticamente a existência de `scrcpy.exe` e `adb.exe`.
-3.  Um arquivo `config.json` será gerado para salvar o caminho e suas preferências de IP/Porta.
-
-### 3. Interface e Controles
-
-#### Campos
-* **IP:** Endereço do dispositivo Android (Ex: `10.0.0.100`).
-* **Porta:** Porta ADB (Padrão: `5555` se configurado via USB, ou aleatória se via Wireless nativo).
-* **Buffer:** Latência de áudio em ms (Padrão: `200`).
-
-#### Ações
-* **Conexão Rápida:** Tenta conectar no IP/Porta definidos e abre o áudio imediatamente.
-* **Parear:** Inicia o pareamento ADB (Wireless Android 11+).
-  > ⚠️ **Atenção:** O pareamento via interface ainda não está totalmente concluído. Caso falhe, realize o processo manualmente via terminal (CMD/Powershell) na pasta do scrcpy:
-  > ```bash
-  > adb pair HOST[:PORT] [PAIRING CODE]
-  > ```
-* **Conexão Manual:** Permite forçar conexão em IP específico.
-* **Fechar Conexão:** Desconecta o ADB e encerra o processo do scrcpy, mantendo a janela aberta.
-
-#### Observações
-* **Logs:** O status da conexão e erros aparecem no painel inferior da janela.
-* **Encerramento:** Ao fechar a janela, o scrcpy é finalizado e a conexão ADB é encerrada automaticamente para economizar bateria do dispositivo.
-
-> **Nota:** Ferramenta testada e validada no **Windows** com **scrcpy 3.3.2**.
+1. O Android executa um script Python no Termux (`adb_publish.py`) que monitora o serviço **mDNS do ADB Wireless**.  
+2. O script detecta a **porta dinâmica** (que muda a cada conexão) e inicia um **mini servidor HTTP na porta 8000**.  
+3. O AudioDroid (PC) consulta:  
+   http://IP_DO_CELULAR:8000  
+4. Ao receber o JSON com a porta correta, o AudioDroid conecta o ADB e inicia o scrcpy com flags otimizadas para áudio (`--no-video`, `--audio-buffer`).  
+5. O controle de volume e os atalhos de teclado interagem diretamente com o processo do scrcpy e o ADB shell.
 
 ---
 
-## 🛠️ Desenvolvimento e Build
+## Instalação e Uso
 
-Caso queira rodar o código fonte ou compilar por conta própria.
+### 1. Preparação do Android (Obrigatório)
 
-### Requisitos
-* Windows 10/11 (Adaptável para Linux/macOS)
-* Python 3.8+
-* `scrcpy` e `adb` acessíveis (no PATH ou apontados na config)
+Antes de tudo, é necessário habilitar a depuração no seu dispositivo.
 
-### Instalação do Ambiente
+<details>
+<summary><b>Mostrar instruções do Android</b></summary>
 
-```bash
-# Criação do ambiente virtual
-python -m venv .venv
+#### A. Android 11+ (Recomendado – Wireless)
 
-# Ativação
-.venv\Scripts\activate
+1. Vá em **Configurações > Opções do Desenvolvedor**
+2. Ative **Depuração por Wi-Fi**
+3. Toque no texto para entrar no menu e selecione **“Parear dispositivo com código”**
+4. Use a função **Parear** no AudioDroid com o **IP**, **Porta** e **Código** exibidos
 
-# Instalação das dependências
-pip install --upgrade pip
-pip install customtkinter
+#### B. Android 10 ou inferior (Cabo USB)
+
+1. Conecte o dispositivo via **USB**
+2. Execute o comando: adb tcpip 5555
+3. Desconecte o cabo e use a conexão manual na porta **5555**
+
+</details>
+
+---
+
+### 2. Configuração do Servidor (Termux)
+
+Para que a função **⚡ Auto Conectar** funcione, o celular precisa informar a porta ao PC.
+
+<details>
+<summary><b>Mostrar scripts do Termux</b></summary>
+
+#### Instalar dependências no Termux
+
+Execute no Termux:
+```sh
+pkg update -y  
+pkg install python termux-api -y  
+pip install zeroconf
+```
+
+#### Criar o script do servidor (adb_publish.py)
+
+Crie um arquivo chamado **adb_publish.py** com o seguinte conteúdo:
+```python
+import time, socket, subprocess, json, threading  
+from http.server import BaseHTTPRequestHandler, HTTPServer  
+from zeroconf import Zeroconf  
+
+ADB_SERVICE_TYPE = "_adb-tls-connect._tcp.local."  
+SERVER_PORT = 8000  
+CURRENT_ADB_DATA = {"status": "scanning", "ip": None, "port": None}  
+
+def update_notification(title, content):  
+    subprocess.run(["termux-notification", "--id", "adb_service", "--title", title, "--content", content, "--ongoing"])  
+
+class APIMinimale(BaseHTTPRequestHandler):  
+    def do_GET(self):  
+        self.send_response(200)  
+        self.send_header("Content-type", "application/json")  
+        self.end_headers()  
+        self.wfile.write(json.dumps(CURRENT_ADB_DATA).encode("utf-8"))  
+
+class ADBObserver:  
+    def add_service(self, zc, type_, name):  
+        info = zc.get_service_info(type_, name)  
+        if info:  
+            ipv4 = next((socket.inet_ntoa(addr) for addr in info.addresses if len(addr) == 4), None)  
+            if ipv4:  
+                CURRENT_ADB_DATA.update({"status": "connected", "ip": ipv4, "port": info.port})  
+                update_notification("AudioDroid: Online", f"API: {SERVER_PORT} | ADB: {info.port}")  
+
+if __name__ == "__main__":  
+    threading.Thread(target=lambda: HTTPServer(("0.0.0.0", SERVER_PORT), APIMinimale).serve_forever(), daemon=True).start()  
+    Zeroconf().add_service_listener(ADB_SERVICE_TYPE, ADBObserver())  
+    try:  
+        while True: time.sleep(1)  
+    except KeyboardInterrupt:  
+        subprocess.run(["termux-notification-remove", "adb_service"])  
+```
+#### Criar o inicializador (iniciar.sh)
+
+Crie um arquivo chamado **iniciar.sh**:
+```sh
+#!/bin/bash  
+termux-wake-lock  
+python adb_publish.py  
+termux-wake-unlock  
+```
+#### Executar
+
+Dê permissão e execute:
+
+`./iniciar.sh`
+
+</details>
+
+---
+
+### 3. Executando no PC
+
+1. Baixe o [**Scrcpy v3.3.2**](https://github.com/Genymobile/scrcpy/releases)
+2. Execute o **AudioDroid.exe**
+3. Aponte a pasta onde o scrcpy foi extraído
+4. Digite o **IP do celular** e clique em **⚡ Auto Conectar**
+
+---
+
+## Configuração
+
+O arquivo **config.json** é gerado automaticamente na raiz do executável.
+
+Campos:
+
+- **scrcpy / adb** – Caminhos absolutos dos executáveis  
+- **last_ip** – Último IP conectado  
+- **backup_ip** – IP anterior (alternância de redes)  
+- **volume** – Volume salvo (0.0 a 1.0)
+
+---
+
+## Desenvolvimento
+
+### Executar a partir do código fonte
+
+1. Clone o repositório
+2. Instale as dependências:
+
+`pip install customtkinter requests keyboard pycaw comtypes`
+
+3. Execute:
+
+`python main.py`
+
+---
+
+### Build (Executável)
+
+`pyinstaller --noconsole --onefile --icon=app.ico --name="AudioDroid" main.py`
