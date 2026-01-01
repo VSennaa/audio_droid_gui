@@ -1,172 +1,134 @@
 ## AudioDroid (GUI)
 
-**AudioDroid** é uma interface minimalista para conectar o **scrcpy** em modo **apenas áudio (playback)**.  
-Ele resolve o problema de **portas dinâmicas do ADB Wireless no Android 11+** e oferece **controles nativos no Windows**.
+AudioDroid fornece uma interface para iniciar e controlar uma instância de `scrcpy` configurada para captura de áudio (modo sem vídeo). O objetivo deste repositório é automatizar a descoberta da porta ADB dinâmica e expor controles locais para volume e atalhos globais.
 
-### Principais recursos
+### Funcionalidades (resumo técnico)
 
-- **Auto-Connect Inteligente**  
-  Detecta automaticamente a porta ADB dinâmica consultando um servidor Python no Termux via HTTP.
-
-- **Controle de Volume Independente**  
-  Ajusta o volume apenas do processo do scrcpy, sem alterar o mixer global do Windows.
-
-- **Global Hotkeys**  
-  Pause e despause a música do celular usando a tecla de mídia do teclado ou **Ctrl + Alt + P**, mesmo com o app minimizado.
-
-- **Histórico Inteligente (Smart Stack)**  
-  Alterna automaticamente entre IPs de redes diferentes (ex: Wi-Fi 2.4 GHz / 5 GHz).
+- Auto-discovery ADB: consulta um endpoint HTTP exposto no dispositivo Android para obter IP/porta ADB dinâmicos.
+- Execução de `scrcpy` em modo áudio: chama `scrcpy` com parâmetros de apenas áudio (`--no-video` e flags de buffer quando aplicável).
+- Controle de volume por processo: ajusta o volume do processo do `scrcpy` no host Windows sem alterar o mixer global.
+- Hotkeys globais: define atalhos para pausar/resumir reprodução, válidos mesmo com a janela minimizada.
+- Failover de IP: mantém histórico de IPs para alternância entre redes (por exemplo, 2.4/5 GHz).
 
 ---
 
-## Como Funciona
+## Arquitetura e fluxo
 
-1. O Android executa um script Python no Termux (`adb_publish.py`) que monitora o serviço **mDNS do ADB Wireless**.  
-2. O script detecta a **porta dinâmica** (que muda a cada conexão) e inicia um **mini servidor HTTP na porta 8000**.  
-3. O AudioDroid (PC) consulta:  
-   http://IP_DO_CELULAR:8000  
-4. Ao receber o JSON com a porta correta, o AudioDroid conecta o ADB e inicia o scrcpy com flags otimizadas para áudio (`--no-video`, `--audio-buffer`).  
-5. O controle de volume e os atalhos de teclado interagem diretamente com o processo do scrcpy e o ADB shell.
+1. No Android, um agente em `Termux` (script `adb_publish.py`) observa anúncios mDNS/zeroconf do ADB Wireless e expõe um pequeno servidor HTTP (por padrão `:8000`) com um payload JSON contendo `ip` e `port` do serviço ADB.
+2. No host Windows, o cliente (AudioDroid) consulta `http://<IP_DO_CELULAR>:8000` para obter a porta ADB atual.
+3. O cliente estabelece conexão ADB usando o IP e porta fornecidos e inicializa `scrcpy` com parâmetros que desabilitam vídeo e habilitam saída/encaminhamento de áudio.
+4. Controles de volume e atalhos interagem com o processo `scrcpy` (identificação do PID) e com o `adb shell` quando necessário.
 
 ---
 
-## Instalação e Uso
+## Instalação e configuração
 
-### 1. Preparação do Android (Obrigatório)
+Requisitos
 
-Antes de tudo, é necessário habilitar a depuração no seu dispositivo.
+- Host (Windows): `python` 3.8+ (se executar a partir do código), `scrcpy` (binários compatíveis com a versão usada).  
+- Dispositivo Android: `Termux` (ou outro ambiente capaz de executar Python) e depuração ADB habilitada.
 
-<details>
-<summary><b>Mostrar instruções do Android</b></summary>
+1) Preparação do Android
 
-#### A. Android 11+ (Recomendado – Wireless)
+- Habilite a depuração ADB (USB ou Wi‑Fi) em `Opções do desenvolvedor`. Para pareamento via código (Android 11+), siga o fluxo de pareamento do Android.
 
-1. Vá em **Configurações > Opções do Desenvolvedor**
-2. Ative **Depuração por Wi-Fi**
-3. Toque no texto para entrar no menu e selecione **“Parear dispositivo com código”**
-4. Use a função **Parear** no AudioDroid com o **IP**, **Porta** e **Código** exibidos
+2) Configuração do agente no Android (Termux)
 
-#### B. Android 10 ou inferior (Cabo USB)
+- Instalar dependências no Termux:
 
-1. Conecte o dispositivo via **USB**
-2. Execute o comando: adb tcpip 5555
-3. Desconecte o cabo e use a conexão manual na porta **5555**
-
-</details>
-
----
-
-### 2. Configuração do Servidor (Termux)
-
-Para que a função **⚡ Auto Conectar** funcione, o celular precisa informar a porta ao PC.
-
-<details>
-<summary><b>Mostrar scripts do Termux</b></summary>
-
-#### Instalar dependências no Termux
-
-Execute no Termux:
 ```sh
-pkg update -y  
-pkg install python termux-api -y  
+pkg update -y
+pkg install python termux-api -y
 pip install zeroconf
 ```
 
-#### Criar o script do servidor (adb_publish.py)
+- Exemplo de `adb_publish.py` (resumo): o agente monitora serviços zeroconf `_adb-tls-connect._tcp.local.`, extrai o endereço IPv4 e a porta, e expõe o estado via HTTP JSON em `:8000`.
 
-Crie um arquivo chamado **adb_publish.py** com o seguinte conteúdo:
+- Inicializador (`iniciar.sh`): mantém o agente em execução e usa `termux-wake-lock` quando necessário.
+
+Com o agente rodando, o host já pode consultar o endpoint para obter IP/porta ADB.
+
+3) Execução no host (PC)
+
+- Baixe/extraia uma versão compatível de `scrcpy`.  
+- Aponte a aplicação para o diretório onde estão os binários do `scrcpy`.  
+- Use a função de Auto-Connect ou forneça IP/porta manualmente para iniciar o `scrcpy` em modo áudio.
+
+---
+
+## Arquivo de configuração
+
+O `config.json` (gerado automaticamente na primeira execução) contém campos principais:  
+- `scrcpy` / `adb`: caminhos absolutos para os executáveis.  
+- `last_ip`: último IP conectado.  
+- `backup_ip`: IP anterior para failover.  
+- `volume`: nível de volume salvo (0.0–1.0).
+
+Os valores podem ser ajustados manualmente conforme necessário.
+
+---
+
+## Scripts e exemplos
+
+Exemplo simplificado de `adb_publish.py` (implementação mínima de referência):
+
 ```python
-import time, socket, subprocess, json, threading  
-from http.server import BaseHTTPRequestHandler, HTTPServer  
-from zeroconf import Zeroconf  
+import time, socket, subprocess, json, threading
+from http.server import BaseHTTPRequestHandler, HTTPServer
+from zeroconf import Zeroconf
 
-ADB_SERVICE_TYPE = "_adb-tls-connect._tcp.local."  
-SERVER_PORT = 8000  
-CURRENT_ADB_DATA = {"status": "scanning", "ip": None, "port": None}  
+ADB_SERVICE_TYPE = "_adb-tls-connect._tcp.local."
+SERVER_PORT = 8000
+CURRENT_ADB_DATA = {"status": "scanning", "ip": None, "port": None}
 
-def update_notification(title, content):  
-    subprocess.run(["termux-notification", "--id", "adb_service", "--title", title, "--content", content, "--ongoing"])  
+class APIMinimal(BaseHTTPRequestHandler):
+  def do_GET(self):
+    self.send_response(200)
+    self.send_header("Content-type", "application/json")
+    self.end_headers()
+    self.wfile.write(json.dumps(CURRENT_ADB_DATA).encode("utf-8"))
 
-class APIMinimale(BaseHTTPRequestHandler):  
-    def do_GET(self):  
-        self.send_response(200)  
-        self.send_header("Content-type", "application/json")  
-        self.end_headers()  
-        self.wfile.write(json.dumps(CURRENT_ADB_DATA).encode("utf-8"))  
+class ADBObserver:
+  def add_service(self, zc, type_, name):
+    info = zc.get_service_info(type_, name)
+    if info:
+      ipv4 = next((socket.inet_ntoa(a) for a in info.addresses if len(a) == 4), None)
+      if ipv4:
+        CURRENT_ADB_DATA.update({"status": "connected", "ip": ipv4, "port": info.port})
 
-class ADBObserver:  
-    def add_service(self, zc, type_, name):  
-        info = zc.get_service_info(type_, name)  
-        if info:  
-            ipv4 = next((socket.inet_ntoa(addr) for addr in info.addresses if len(addr) == 4), None)  
-            if ipv4:  
-                CURRENT_ADB_DATA.update({"status": "connected", "ip": ipv4, "port": info.port})  
-                update_notification("AudioDroid: Online", f"API: {SERVER_PORT} | ADB: {info.port}")  
-
-if __name__ == "__main__":  
-    threading.Thread(target=lambda: HTTPServer(("0.0.0.0", SERVER_PORT), APIMinimale).serve_forever(), daemon=True).start()  
-    Zeroconf().add_service_listener(ADB_SERVICE_TYPE, ADBObserver())  
-    try:  
-        while True: time.sleep(1)  
-    except KeyboardInterrupt:  
-        subprocess.run(["termux-notification-remove", "adb_service"])  
+if __name__ == "__main__":
+  threading.Thread(target=lambda: HTTPServer(("0.0.0.0", SERVER_PORT), APIMinimal).serve_forever(), daemon=True).start()
+  Zeroconf().add_service_listener(ADB_SERVICE_TYPE, ADBObserver())
+  try:
+    while True:
+      time.sleep(1)
+  except KeyboardInterrupt:
+    pass
 ```
-#### Criar o inicializador (iniciar.sh)
-
-Crie um arquivo chamado **iniciar.sh**:
-```sh
-#!/bin/bash  
-termux-wake-lock  
-python adb_publish.py  
-termux-wake-unlock  
-```
-#### Executar
-
-Dê permissão e execute:
-
-`./iniciar.sh`
-
-</details>
-
----
-
-### 3. Executando no PC
-
-1. Baixe o [**Scrcpy v3.3.2**](https://github.com/Genymobile/scrcpy/releases)
-2. Execute o **AudioDroid.exe**
-3. Aponte a pasta onde o scrcpy foi extraído
-4. Digite o **IP do celular** e clique em **⚡ Auto Conectar**
-
----
-
-## Configuração
-
-O arquivo **config.json** é gerado automaticamente na raiz do executável.
-
-Campos:
-
-- **scrcpy / adb** – Caminhos absolutos dos executáveis  
-- **last_ip** – Último IP conectado  
-- **backup_ip** – IP anterior (alternância de redes)  
-- **volume** – Volume salvo (0.0 a 1.0)
 
 ---
 
 ## Desenvolvimento
 
-### Executar a partir do código fonte
+Executar a partir do código-fonte
 
-1. Clone o repositório
-2. Instale as dependências:
+```sh
+pip install customtkinter requests keyboard pycaw comtypes zeroconf
+python main.py
+```
 
-`pip install customtkinter requests keyboard pycaw comtypes`
+Build (criando executável)
 
-3. Execute:
-
-`python main.py`
+```sh
+pyinstaller --noconsole --onefile --icon=app.ico --name="AudioDroid" main.py
+```
 
 ---
 
-### Build (Executável)
+## Observações e limitações
 
-`pyinstaller --noconsole --onefile --icon=app.ico --name="AudioDroid" main.py`
+- Este projeto assume que o ambiente do dispositivo Android permite execução contínua de um agente em Termux.  
+- A qualidade e latência do áudio dependem da versão do `scrcpy` e das configurações de buffer/encaminhamento.  
+- A operação em redes com configurações restritivas (NAT/isolamento entre SSIDs) pode exigir ajustes manuais.
+
+---
