@@ -50,7 +50,7 @@ Com o agente rodando, o host já pode consultar o endpoint para obter IP/porta A
 
 3) Execução no host (PC)
 
-- Baixe/extraia uma versão compatível de `scrcpy`.  
+- Baixe/extraia uma versão compatível de [`scrcpy`](https://github.com/Genymobile/scrcpy/releases), preferencialmente a 3.3.2, mais recentes não foram testadas.  
 - Aponte a aplicação para o diretório onde estão os binários do `scrcpy`.  
 - Use a função de Auto-Connect ou forneça IP/porta manualmente para iniciar o `scrcpy` em modo áudio.
 
