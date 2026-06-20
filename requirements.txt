@@ -1,0 +1,8 @@
+customtkinter
+requests
+keyboard
+pycaw
+comtypes
+zeroconf
+qrcode
+Pillow

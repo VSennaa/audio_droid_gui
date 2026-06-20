@@ -1,0 +1,9 @@
+{
+    "scrcpy": "D:/Arquivos/Documents/Projetos/audio_droid_gui/scrcpy-win64-v3.3.2\\scrcpy.exe",
+    "adb": "D:/Arquivos/Documents/Projetos/audio_droid_gui/scrcpy-win64-v3.3.2\\adb.exe",
+    "last_ip": "10.0.0.69",
+    "backup_ip": "",
+    "volume": 0.235,
+    "buffer": 47,
+    "auto_buffer": true
+}
