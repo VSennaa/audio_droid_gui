@@ -6,6 +6,22 @@ import signal
 import threading
 import subprocess
 from typing import Optional, Tuple
+import string
+import secrets
+from random import randint
+
+try:
+    import qrcode
+    from PIL import Image, ImageTk
+    QR_AVAILABLE = True
+except ImportError:
+    QR_AVAILABLE = False
+
+try:
+    from zeroconf import Zeroconf, ServiceBrowser, ServiceListener, IPVersion
+    ZEROCONF_AVAILABLE = True
+except ImportError:
+    ZEROCONF_AVAILABLE = False
 
 # Bibliotecas de Terceiros
 import requests
@@ -25,7 +41,7 @@ except ImportError:
 # --- Constantes ---
 CONFIG_FILE = "config.json"
 DEFAULT_BUFFER = 200
-TERMUX_PORT = 8000
+
 
 # Cores de Status
 STATUS_DISCONNECTED = "#C0392B"  # Vermelho
@@ -44,13 +60,15 @@ def load_config() -> dict:
     return {}
 
 
-def save_config(scrcpy_exe, adb_exe, last_ip="", backup_ip="", volume=1.0):
+def save_config(scrcpy_exe, adb_exe, last_ip="", backup_ip="", volume=1.0, buffer=DEFAULT_BUFFER, auto_buffer=True):
     config = {
         "scrcpy": scrcpy_exe,
         "adb": adb_exe,
         "last_ip": last_ip,
         "backup_ip": backup_ip,
-        "volume": volume
+        "volume": volume,
+        "buffer": buffer,
+        "auto_buffer": auto_buffer
     }
     with open(CONFIG_FILE, "w", encoding="utf-8") as f:
         json.dump(config, f, indent=4)
@@ -90,6 +108,13 @@ def run_adb_command(adb_path, args, log_callback=None):
             text=True,
             creationflags=get_subprocess_flags()
         )
+        if log_callback:
+            output = (result.stdout or "").strip()
+            err = (result.stderr or "").strip()
+            if output:
+                log_callback(f"ADB: {output}")
+            if err:
+                log_callback(f"ADB: {err}")
         return result.returncode == 0
     except Exception as e:
         if log_callback:
@@ -110,6 +135,144 @@ class VolumeController:
                     volume.SetMasterVolume(volume_float, None)
         except Exception:
             pass
+
+
+class QRADBListener(ServiceListener):
+    def __init__(self, target_name, password, success_callback, log_callback, adb_path):
+        self.target_name = target_name
+        self.password = password
+        self.success_callback = success_callback
+        self.log_callback = log_callback
+        self.adb_path = adb_path
+
+    def remove_service(self, zc, type_, name):
+        pass
+
+    def add_service(self, zc, type_, name):
+        if self.target_name in name:
+            info = zc.get_service_info(type_, name)
+            if info:
+                self.pair(info)
+
+    def update_service(self, zc, type_, name):
+        pass
+
+    def pair(self, info):
+        try:
+            ip_address = info.ip_addresses_by_version(IPVersion.All)[0].exploded
+            port = info.port
+            host_port = f"{ip_address}:{port}"
+            self.log_callback(f"Serviço mDNS encontrado: {host_port}. Tentando parear...")
+            success = run_adb_command(self.adb_path, ["pair", host_port, str(self.password)], self.log_callback)
+            if success:
+                self.log_callback("Pareamento QR bem-sucedido!")
+                self.success_callback(ip_address)
+            else:
+                self.log_callback("Falha no pareamento QR.")
+        except Exception as e:
+            self.log_callback(f"Erro no listener mDNS: {e}")
+
+
+class QRPairingDialog(ctk.CTkToplevel):
+    def __init__(self, parent, adb_path, log_callback):
+        super().__init__(parent)
+        self.title("Pareamento")
+        self.geometry("400x500")
+        self.resizable(False, False)
+        self.adb_path = adb_path
+        self.log_callback = log_callback
+        
+        self.zeroconf = None
+        self.browser = None
+
+        # Gerar credenciais
+        self.service_name = f"audiodroid-{''.join(secrets.choice(string.ascii_lowercase + string.digits) for _ in range(6))}"
+        self.password = f"{randint(100000, 999999)}"
+        
+        self.create_widgets()
+        if ZEROCONF_AVAILABLE:
+            self.start_mdns()
+        
+        self.protocol("WM_DELETE_WINDOW", self.on_close)
+
+    def create_widgets(self):
+        self.tabview = ctk.CTkTabview(self)
+        self.tabview.pack(fill="both", expand=True, padx=10, pady=10)
+        
+        tab_qr = self.tabview.add("QR Code")
+        tab_manual = self.tabview.add("Manual")
+        
+        # --- TAB QR ---
+        lbl_info = ctk.CTkLabel(tab_qr, text="1. Habilite 'Depuração sem Fio'\n2. Escolha 'Parear dispositivo com QR Code'\n3. Escaneie o código abaixo:", justify="center")
+        lbl_info.pack(pady=10)
+        
+        self.qr_label = ctk.CTkLabel(tab_qr, text="")
+        self.qr_label.pack(pady=10)
+        
+        if QR_AVAILABLE:
+            qr_data = f"WIFI:T:ADB;S:{self.service_name};P:{self.password};;"
+            qr = qrcode.QRCode(box_size=6, border=2)
+            qr.add_data(qr_data)
+            qr.make(fit=True)
+            img = qr.make_image(fill_color="black", back_color="white").get_image()
+            self.qr_image = ctk.CTkImage(light_image=img, dark_image=img, size=(200, 200))
+            self.qr_label.configure(image=self.qr_image, text="")
+        else:
+            self.qr_label.configure(text="Bibliotecas qrcode/Pillow não instaladas.\nInstale com: pip install qrcode Pillow")
+            
+        self.lbl_status = ctk.CTkLabel(tab_qr, text="Status: Aguardando scan...", text_color="#E0A800")
+        self.lbl_status.pack(pady=10)
+        
+        # --- TAB MANUAL ---
+        ctk.CTkLabel(tab_manual, text="IP:Porta (Pareamento)").pack(pady=(20, 5))
+        self.entry_host = ctk.CTkEntry(tab_manual, placeholder_text="Ex: 192.168.1.10:45678")
+        self.entry_host.pack(pady=5)
+        
+        ctk.CTkLabel(tab_manual, text="Código de Pareamento").pack(pady=(10, 5))
+        self.entry_code = ctk.CTkEntry(tab_manual, placeholder_text="Ex: 123456")
+        self.entry_code.pack(pady=5)
+        
+        btn_pair = ctk.CTkButton(tab_manual, text="Parear", command=self.do_manual_pair)
+        btn_pair.pack(pady=20)
+
+    def start_mdns(self):
+        try:
+            self.zeroconf = Zeroconf()
+            listener = QRADBListener(
+                self.service_name, 
+                self.password, 
+                self.on_success, 
+                self.log_callback, 
+                self.adb_path
+            )
+            self.browser = ServiceBrowser(self.zeroconf, "_adb-tls-pairing._tcp.local.", listener)
+            self.log_callback("Aguardando dispositivo escanear QR Code...")
+        except Exception as e:
+            self.log_callback(f"Erro ao iniciar mDNS para pareamento: {e}")
+
+    def do_manual_pair(self):
+        host = self.entry_host.get()
+        code = self.entry_code.get()
+        if host and code:
+            self.log_callback(f"Tentando pareamento manual com {host}...")
+            success = run_adb_command(self.adb_path, ["pair", host, code], self.log_callback)
+            if success:
+                self.on_success(host.split(':')[0])
+            else:
+                self.log_callback("Falha no pareamento manual.")
+
+    def on_success(self, ip_address):
+        self.lbl_status.configure(text="Sucesso! Pareado.", text_color="#27AE60")
+        self.log_callback(f"Pareado com {ip_address}")
+        self.after(2000, self.on_close)
+        
+    def on_close(self):
+        if self.zeroconf:
+            try:
+                self.zeroconf.close()
+            except Exception:
+                pass
+        self.destroy()
 
 
 class AudioDroidApp(ctk.CTk):
@@ -139,7 +302,8 @@ class AudioDroidApp(ctk.CTk):
         # Variáveis de Estado
         self.ip_var = ctk.StringVar(value=self.config_data.get("last_ip", ""))
         self.port_var = ctk.StringVar(value="")
-        self.buffer_var = ctk.IntVar(value=DEFAULT_BUFFER)
+        self.buffer_var = ctk.IntVar(value=self.config_data.get("buffer", DEFAULT_BUFFER))
+        self.auto_buffer_var = ctk.BooleanVar(value=self.config_data.get("auto_buffer", True))
         
         # Carrega o volume salvo ou 1.0 (100%) por padrão
         saved_vol = self.config_data.get("volume", 1.0)
@@ -160,10 +324,19 @@ class AudioDroidApp(ctk.CTk):
 
         ctk.CTkEntry(top_frame, textvariable=self.ip_var, width=120, placeholder_text="IP").pack(side="left", padx=2)
         ctk.CTkEntry(top_frame, textvariable=self.port_var, width=70, placeholder_text="Porta").pack(side="left", padx=2)
-        ctk.CTkEntry(top_frame, textvariable=self.buffer_var, width=50).pack(side="left", padx=2)
+        self.entry_buffer = ctk.CTkEntry(top_frame, textvariable=self.buffer_var, width=50)
+        self.entry_buffer.pack(side="left", padx=2)
+        
+        self.chk_auto_buffer = ctk.CTkCheckBox(
+            top_frame, text="Auto", variable=self.auto_buffer_var, 
+            command=self.toggle_auto_buffer, width=50
+        )
+        self.chk_auto_buffer.pack(side="left", padx=2)
 
         ctk.CTkButton(top_frame, text="🔗", width=30, fg_color="#555", command=self.manual_connect).pack(side="right", padx=2)
         ctk.CTkButton(top_frame, text="🔑", width=30, fg_color="#555", command=self.pair_adb_dialog).pack(side="right", padx=2)
+        
+        self.toggle_auto_buffer()
 
         # 2. Status Bar
         self.status_bar = ctk.CTkLabel(
@@ -247,10 +420,32 @@ class AudioDroidApp(ctk.CTk):
         threading.Thread(target=self._send_media_key, daemon=True).start()
 
     def _send_media_key(self):
-        run_adb_command(self.adb_path, ["shell", "input", "keyevent", "85"], self.log_print)
+        run_adb_command(self.adb_path, ["shell", "cmd", "media_session", "dispatch", "play-pause"], self.log_print)
 
     def on_volume_change(self, value):
         VolumeController.set_scrcpy_volume(value)
+
+    def toggle_auto_buffer(self):
+        if self.auto_buffer_var.get():
+            self.entry_buffer.configure(state="disabled")
+        else:
+            self.entry_buffer.configure(state="normal")
+
+    def measure_network_latency(self, ip, port) -> int:
+        latencies = []
+        import time
+        import socket
+        for _ in range(3):
+            try:
+                start = time.time()
+                s = socket.create_connection((ip, int(port)), timeout=0.5)
+                s.close()
+                latencies.append((time.time() - start) * 1000)
+            except:
+                pass
+        if latencies:
+            return int(sum(latencies) / len(latencies))
+        return 100
 
     def save_current_state(self):
         """Salva IPs e Volume atuais"""
@@ -259,7 +454,9 @@ class AudioDroidApp(ctk.CTk):
             self.adb_path,
             self.config_data.get("last_ip", ""),
             self.config_data.get("backup_ip", ""),
-            self.volume_var.get()
+            self.volume_var.get(),
+            self.buffer_var.get(),
+            self.auto_buffer_var.get()
         )
 
     def update_config_ips(self, success_ip):
@@ -284,62 +481,54 @@ class AudioDroidApp(ctk.CTk):
     def thread_auto_connect(self):
         threading.Thread(target=self.auto_connect_logic, daemon=True).start()
 
-    def try_connect_termux(self, ip_target) -> Optional[int]:
-        if not ip_target:
-            return None
-        try:
-            url = f"http://{ip_target}:{TERMUX_PORT}"
-            response = requests.get(url, timeout=1.5)
-            if response.status_code == 200:
-                data = response.json()
-                if data.get("status") == "connected":
-                    return data.get("port")
-        except Exception:
-            pass
-        return None
-
     def auto_connect_logic(self):
-        self.set_status("Buscando IPs...", STATUS_SEARCHING)
-        manual_ip = self.ip_var.get().strip()
-        last_ip = self.config_data.get("last_ip", "")
-        backup_ip = self.config_data.get("backup_ip", "")
+        self.set_status("Buscando rede...", STATUS_SEARCHING)
+        
+        found = {"ip": None, "port": None}
+        
+        class ConnectListener(ServiceListener):
+            def remove_service(self, zc, type_, name):
+                pass
+            def add_service(self, zc, type_, name):
+                info = zc.get_service_info(type_, name)
+                if info:
+                    try:
+                        ip = info.ip_addresses_by_version(IPVersion.All)[0].exploded
+                        found["ip"] = ip
+                        found["port"] = info.port
+                    except:
+                        pass
+            def update_service(self, zc, type_, name):
+                pass
 
-        candidates = []
-        if manual_ip:
-            candidates.append(manual_ip)
-        if last_ip and last_ip != manual_ip:
-            candidates.append(last_ip)
-        if backup_ip and backup_ip != manual_ip and backup_ip != last_ip:
-            candidates.append(backup_ip)
-
-        found_port = None
-        working_ip = None
-
-        for ip in candidates:
-            self.set_status(f"Testando {ip}...", STATUS_CONNECTING)
-            port = self.try_connect_termux(ip)
-            if port:
-                found_port = port
-                working_ip = ip
-                break
-
-        if found_port:
-            self.port_var.set(str(found_port))
-            self.ip_var.set(working_ip)
-            self.update_config_ips(working_ip)
-            self.connect_and_start(working_ip, str(found_port))
+        if ZEROCONF_AVAILABLE:
+            try:
+                zc = Zeroconf()
+                listener = ConnectListener()
+                browser = ServiceBrowser(zc, "_adb-tls-connect._tcp.local.", listener)
+                
+                # Aguarda até 5 segundos
+                for _ in range(50):
+                    if found["ip"]:
+                        break
+                    time.sleep(0.1)
+                    
+                zc.close()
+            except Exception as e:
+                self.log_print(f"Erro no mDNS: {e}")
+                
+        if found["ip"] and found["port"]:
+            self.port_var.set(str(found["port"]))
+            self.ip_var.set(found["ip"])
+            self.update_config_ips(found["ip"])
+            self.connect_and_start(found["ip"], str(found["port"]))
         else:
-            self.set_status("Falha. Tente Manual.", STATUS_DISCONNECTED)
-            self.log_print("Nenhum IP respondeu.")
+            self.set_status("Nenhum celular encontrado.", STATUS_DISCONNECTED)
+            self.log_print("Falha ao encontrar dispositivo via mDNS. Verifique se a depuração por Wi-Fi está ativada e conectada na mesma rede.")
 
     def pair_adb_dialog(self):
-        host_port = ctk.CTkInputDialog(text="IP:Porta", title="Parear").get_input()
-        if not host_port:
-            return
-        code = ctk.CTkInputDialog(text="Código:", title="Parear").get_input()
-        if not code:
-            return
-        run_adb_command(self.adb_path, ["pair", host_port, code], self.log_print)
+        dialog = QRPairingDialog(self, self.adb_path, self.log_print)
+        dialog.grab_set()
 
     def manual_connect(self):
         ip = self.ip_var.get()
@@ -350,6 +539,13 @@ class AudioDroidApp(ctk.CTk):
         self.connect_and_start(ip, port)
 
     def connect_and_start(self, ip, port):
+        if self.auto_buffer_var.get():
+            latency = self.measure_network_latency(ip, port)
+            new_buffer = latency + 30
+            self.buffer_var.set(new_buffer)
+            self.log_print(f"Auto Buffer: Ping {latency}ms -> Buffer {new_buffer}ms")
+            self.save_current_state()
+
         self.set_status(f"Conectado: {ip}:{port}", STATUS_CONNECTED)
         run_adb_command(self.adb_path, ["connect", f"{ip}:{port}"], self.log_print)
         self.start_scrcpy_process(ip, port)
